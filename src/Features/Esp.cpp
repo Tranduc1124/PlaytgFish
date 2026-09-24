@@ -29,14 +29,13 @@ struct Vec3 {
 constexpr const char* kActorSystemClass = "ActorSystem";
 constexpr const char* kStaticSelf = "Self";
 constexpr const char* kGetOther = "get_OtherActorCharacter";
-constexpr const char* kGetTransform = "get_Transform";
+constexpr const char* kGetTransform = "get_transform"; // Unity: chữ t thường!
 constexpr const char* kTransformClass = "Transform";
 constexpr const char* kGetPosition = "get_position";
 constexpr const char* kCameraClass = "Camera";
 constexpr const char* kGetMain = "get_main";
 constexpr const char* kWorldToScreen = "WorldToScreenPoint";
 constexpr const char* kActorBaseClass = "ActorBase";
-constexpr const char* kGetNickName = "get_nickName";
 
 void* g_actorSystemClass = nullptr;
 void* g_actorBaseClass = nullptr;
@@ -103,6 +102,9 @@ bool setup() {
 
     g_getOther = reinterpret_cast<void* (*)(void*)>(
         Il2Cpp::resolveByClass(g_actorSystemClass, kGetOther, 0).fnptr);
+    // QUAN TRỌNG: Unity khai báo "get_transform" (t thường) trên
+    // UnityEngine::Component. Tên "get_Transform" (hoa T) KHÔNG tồn tại
+    // -> dùng sai thì hook chain fail ngay.
     g_getTransform = reinterpret_cast<void* (*)(void*)>(
         Il2Cpp::resolveByClass(g_actorBaseClass, kGetTransform, 0).fnptr);
     g_getPosition = reinterpret_cast<Vec3 (*)(void*)>(
@@ -111,8 +113,21 @@ bool setup() {
         Il2Cpp::resolveByClass(g_cameraClass, kGetMain, 0).fnptr);
     g_worldToScreen = reinterpret_cast<Vec3 (*)(void*, Vec3)>(
         Il2Cpp::resolveByClass(g_cameraClass, kWorldToScreen, 1).fnptr);
-    g_nickFn = reinterpret_cast<const void* (*)(void*)>(
-        Il2Cpp::resolveByClass(g_actorBaseClass, kGetNickName, 0).fnptr);
+
+    // Tên người chơi KHÔNG nằm trên ActorBase/ActorCharacter (đã kiểm tra
+    // dump.cs: 28 class khác có get_nickName, không class nào là actor).
+    // Thử vài getter ứng viên; nếu không có thì hiển thị ID.
+    if (!g_nickFn && g_actorBaseClass) {
+        const char* candidates[] = {"get_CoupleNickName", "get_NickName", "get_nickName"};
+        for (const char* c : candidates) {
+            void* p = Il2Cpp::resolveByClass(g_actorBaseClass, c, 0).fnptr;
+            if (p) {
+                g_nickFn = reinterpret_cast<const void* (*)(void*)>(p);
+                PF_LOG("[esp] dùng getter tên: %s", c);
+                break;
+            }
+        }
+    }
 
     if (!g_getOther || !g_getTransform || !g_getPosition || !g_getMain || !g_worldToScreen) {
         setError("thieu method (get_Other/get_Transform/get_position/get_main/W2SP)");

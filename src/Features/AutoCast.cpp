@@ -206,7 +206,7 @@ void resolveAll() {
         f_isBigFishHit = reinterpret_cast<bool (*)(void*)>(
             Il2Cpp::resolveByClass(g_floatClass, "IsBigFishHit", 0).fnptr);
         f_floatTransform = reinterpret_cast<void* (*)(void*)>(
-            Il2Cpp::resolveByClass(g_floatClass, "get_Transform", 0).fnptr);
+            Il2Cpp::resolveByClass(g_floatClass, "get_transform", 0).fnptr);
         if (up.fnptr) {
             // detour cần biết instance float để lấy vị trí khi lôi
             g_floatInstance = nullptr;

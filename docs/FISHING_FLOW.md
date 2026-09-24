@@ -123,7 +123,27 @@ Cá bé (bóng 1-5): `StartFishing()` → `FishingBite()` → `RequestFishingTug
 * **Không** gửi `RequestFishingHit` ngoài state `BigFish_*`, và chỉ gửi `RequestFishingTug`
   khi `IsBigFishHit()` cho phép — y hệt điều kiện của game.
 
-## 6. Cách tái lập các bước trên
+## 6. Bẫy tên hàm Unity — đã vấp và đã sửa
+
+| Sai lầm | Đúng | Ghi chú |
+|---|---|---|
+`get_Transform` | **`get_transform`** | `UnityEngine.Component` khai báo `get_transform()` (t **thường**). Tên hoa T không tồn tại → `resolveByClass` trả null → cả chuỗi ESP fail ngay mà không báo lỗi. |
+
+Kiểm tra tương tự cho các API khác của Unity trước khi dùng:
+```bash
+python3 tools/dumpclass.py <dump.cs> --owner get_transform
+python3 tools/dumpclass.py <dump.cs> Component transform
+```
+
+### Về tên người chơi (ESP)
+`get_nickName` **không** nằm trên `ActorBase`/`ActorCharacter`. Kiểm tra `dump.cs` cho thấy
+**28 class khác** có method này (`PlayerInfo`, `UserInfo`, `ProfileSummary`, `PersonName`…),
+còn `ActorCharacter` chỉ có `SetToNickname` / `SetToPartnerNickname` / `get_CoupleNickName` và
+không có field `string` nào. Kết luận: nickname nằm ở object hồ sơ tách rời, không đọc trực tiếp
+từ actor được. ESP hiện thử lần lượt `get_CoupleNickName` → `get_NickName` → `get_nickName`,
+không có thì hiển thị **ID người chơi** (khoá của Dictionary).
+
+## 7. Cách tái lập các bước trên
 
 ```bash
 # 1) index 520k hàm từ script.json
