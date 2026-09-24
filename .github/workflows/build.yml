@@ -1,0 +1,54 @@
+name: Build PlayFish dylib
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build arm64 dylib
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          export THEOS=/opt/theos
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          # Theos cần Xcode CLT — macOS runner đã có sẵn
+          xcode-select -p
+
+      - name: Cache libs
+        uses: actions/cache@v4
+        with:
+          path: libs
+          key: playfish-libs-${{ hashFiles('scripts/fetch_libs.sh') }}
+
+      - name: Fetch libraries (Dobby + Dear ImGui)
+        run: |
+          chmod +x scripts/fetch_libs.sh
+          ./scripts/fetch_libs.sh
+
+      - name: Build
+        run: |
+          make clean
+          make FINALPACKAGE=1
+          ls -la .theos/obj/PlayFish.dylib
+
+      - name: Inspect Mach-O
+        run: |
+          otool -L .theos/obj/PlayFish.dylib
+          echo "--- install_name ---"
+          otool -D .theos/obj/PlayFish.dylib
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayFish-dylib
+          path: .theos/obj/PlayFish.dylib
+          if-no-files-found: error

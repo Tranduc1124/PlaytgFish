@@ -1,0 +1,19 @@
+# Theos
+.theos/
+packages/
+obj/
+
+# Vendor libs (fetch bằng scripts/fetch_libs.sh)
+libs/Dobby/
+libs/imgui/
+
+# Build output
+*.dylib
+*.o
+*.d
+build/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
