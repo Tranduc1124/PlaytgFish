@@ -64,7 +64,7 @@ def main() -> int:
     methods: dict[tuple[str, str], int] = {}
     fields: dict[tuple[str, str], int] = {}
     current: str | None = None
-    pending_rva: int | None = None  // chú thích RVA nằm ở DÒNG TRƯỚC method
+    pending_rva = None  # chú thích RVA nằm ở DÒNG TRƯỚC dòng chữ ký method
 
     with dump_path.open("r", encoding="utf-8", errors="replace") as f:
         for line in f:
