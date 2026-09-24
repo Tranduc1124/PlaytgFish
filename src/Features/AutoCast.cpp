@@ -45,6 +45,10 @@ void (*f_requestHit)(void*, bool, Vec3, void*) = nullptr; // RequestFishingHit(b
 void (*f_requestStunHit)(void*, void*) = nullptr;    // RequestStunHit(Action)
 void (*f_fishCancel)(void*) = nullptr;               // FishingCancel()
 bool (*f_shadowReady)(void*) = nullptr;              // get_IsShadowFishReady()
+// Điều kiện game dùng để cho phép kéo (đọc code tại 0x2CE13AC):
+//   field(this+0x84) == 15  &&  this+0xA8 != null  &&  IsMyActor() ...
+// -> ta gọi lại đúng hàm của game thay vì viết lại điều kiện.
+bool (*f_isBigFishHit)(void*) = nullptr;
 
 // lấy vị trí float đang câu (để lôi đúng chỗ)
 Vec3 (*f_floatPos)(void*) = nullptr;                 // Transform.get_position(floatTransform)
@@ -199,6 +203,8 @@ void resolveAll() {
         auto up = Il2Cpp::resolveByClass(g_floatClass, "Update", 0);
         f_shadowReady = reinterpret_cast<bool (*)(void*)>(
             Il2Cpp::resolveByClass(g_floatClass, "get_IsShadowFishReady", 0).fnptr);
+        f_isBigFishHit = reinterpret_cast<bool (*)(void*)>(
+            Il2Cpp::resolveByClass(g_floatClass, "IsBigFishHit", 0).fnptr);
         f_floatTransform = reinterpret_cast<void* (*)(void*)>(
             Il2Cpp::resolveByClass(g_floatClass, "get_Transform", 0).fnptr);
         if (up.fnptr) {
@@ -317,10 +323,14 @@ void tick() {
         }
 
         // --- BƯỚC 2: KÉO (tug) ---
+        // Game chỉ cho kéo khi FishingFloatController::IsBigFishHit() trả true
+        // (đọc code tại 0x36DB2B0: bl IsBigFishHit; cbz w0 -> bỏ qua RequestFishingTug).
+        // Ta dùng đúng cổng đó thay vì đoán theo state.
         const bool inFight = st == (int)eFishingState::BigFish_Tug ||
                              st == (int)eFishingState::BigFish_Fighting;
         if (inFight && g_cfg.bigAutoTug && f_requestTug) {
-            void* sys = fishingSystem();
+            const bool gate = f_isBigFishHit ? (g_floatInstance && f_isBigFishHit(g_floatInstance)) : true;
+            void* sys = gate ? fishingSystem() : nullptr;
             if (sys && t - g_lastBig >= (uint64_t)g_cfg.bigTugIntervalMs) {
                 g_lastBig = t;
                 g_status.bigTug++;
