@@ -61,32 +61,49 @@ enum class eFishingState : int {
 // Ngưỡng phân nhánh: >= 13 là cá lớn (bóng cá)
 inline constexpr int kBigFishThreshold = 13;
 
+// Nhóm cỡ cá (Fishlist.FishSizeGroup trong bảng data):
+//   1..5 = cá bé  -> dùng nhánh A (state 0-12)
+//   6..7 = cá to / quái -> dùng nhánh B (state >=13, BigFish_*)
+// Người dùng có thể ép tay nhánh khi game không báo đúng state.
+inline constexpr int kSmallShadowMin = 1;
+inline constexpr int kSmallShadowMax = 5;
+inline constexpr int kBigShadowMin = 6;
+inline constexpr int kBigShadowMax = 7;
+
+enum class ShadowTier {
+    Unknown = 0,
+    Small = 1, // bóng 1-5
+    Big = 2,   // bóng 6-7
+};
+
 struct Settings {
     bool enabled = false;
 
-    // --- nhánh A: cá thường ---
+    // --- nhánh A: cá thường (bóng 1-5) ---
     bool autoCast = true;         // tự quăng câu
-    bool forceCastSuccess = true; // ép castSuccess=true
     bool autoBite = true;         // tự kích hoạt cắn
-    bool autoTug = true;          // tự kéo (Fighting/Hit)
-    bool forceTugSuccess = true;  // success=true + damage max
-    bool forceStun = true;
-    bool forceCatch = true;
-    bool forceLift = true;
-
-    // --- nhánh B: CÁ LỚN / bóng cá ---
-    bool bigAutoCast = true;      // tự quăng câu khi vào raid cá lớn
-    bool bigAutoPumpin = true;    // tự "pumpin" (bóng cá vùng vẫy)
-    bool bigAutoDrag = true;      // tự kéo bóng cá
-    bool bigAutoTug = true;       // tự tug minigame
-    bool bigAutoStun = true;      // tự stun
-    bool bigForceSuccess = true;  // ép mọi kết quả nhánh B thành công
-    bool bigZeroHp = true;        // SetFishHP(0) cho cá lớn
-
-    // --- chung ---
-    int castIntervalMs = 1500;
+    bool autoTug = true;          // tự gửi yêu cầu kéo (tug)
     int tugIntervalMs = 120;
+
+    // --- nhánh B: cá lớn / bóng 6-7 ---
+    bool bigAutoCast = true;      // tự quăng câu sau khi xong màn cá lớn
+    bool bigAutoDrag = true;      // tự LÔI (RequestFishingHit) — bước bắt buộc của bóng 6-7
+    bool bigAutoTug = true;       // tự tug minigame cá lớn
     int bigTugIntervalMs = 150;
+    bool bigAutoStun = true;      // tự gửi yêu cầu stun
+
+    // Lôi theo vị trí float đang câu (lấy từ FishingFloatController.get_Transform)
+    // thay vì điểm (0,0,0).
+    bool bigDragUseFloatPos = true;
+
+    // --- CHỈ tự động thao tác, KHÔNG ép kết quả ---
+    // (game/server tự quyết định thành công hay thất bại)
+
+    // --- chọn nhánh thủ công (0 = tự nhận từ state) ---
+    // 1 = ép nhánh cá bé (1-5), 2 = ép nhánh cá to (6-7)
+    int forceTier = 0;
+
+    int castIntervalMs = 1500;
 };
 
 Settings& settings();
@@ -110,9 +127,9 @@ struct Status {
     void* control = nullptr;
     int currentState = 0;
     bool isBigFish = false;
-    uint64_t casts = 0, bites = 0, tugs = 0, stuns = 0, catches = 0;
-    uint64_t bigPumpin = 0, bigDrag = 0, bigTug = 0;
-    bool serverRejected = false;
+    ShadowTier tier = ShadowTier::Unknown; // nhóm bóng: 1-5 bé / 6-7 to
+    uint64_t casts = 0, bites = 0, tugs = 0, stuns = 0;
+    uint64_t bigDrag = 0, bigTug = 0;
     char note[96] = "";
 };
 

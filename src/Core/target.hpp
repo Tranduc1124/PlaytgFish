@@ -11,8 +11,8 @@ namespace PF {
 
 // Unity IL2CPP: code game nằm trong dylib này (Payload/*.app/Frameworks/UnityFramework)
 inline constexpr const char* kGameImage = "UnityFramework";
-// App executable (dùng khi game native / cần hook tầng app)
-inline constexpr const char* kAppImage = "PlayTogether";
+// App executable — lấy từ CFBundleExecutable trong Info.plist của IPA bản VNG
+inline constexpr const char* kAppImage = "PLAYTOGETHERVNG";
 
 // Load address của image (Mach-O header == image base)
 inline uintptr_t imageBase(const char* imageName) {

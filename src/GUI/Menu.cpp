@@ -359,48 +359,52 @@ void tabAutoCast() {
         ImGui::TextDisabled("đã hook xong");
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Cá thường (state 0-12)");
+    ImGui::TextUnformatted("Nhóm bóng cá");
+    ImGui::TextDisabled("1-5 = cá bé (nhánh thường) | 6-7 = cá to/quái (nhánh BigFish)");
+    ImGui::RadioButton("Tự nhận từ game", &s.forceTier, 0);
+    ImGui::SameLine();
+    ImGui::RadioButton("Ép nhánh cá bé (1-5)", &s.forceTier, 1);
+    ImGui::SameLine();
+    ImGui::RadioButton("Ép nhánh cá to (6-7)", &s.forceTier, 2);
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Cá bé / bóng 1-5");
     ImGui::Checkbox("Tự quăng câu", &s.autoCast);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(140.0f);
     ImGui::SliderInt("nhịp ms", &s.castIntervalMs, 500, 5000);
-    ImGui::Checkbox("Ép cast thành công", &s.forceCastSuccess);
     ImGui::Checkbox("Tự kích hoạt cắn (bite)", &s.autoBite);
-    ImGui::Checkbox("Tự kéo (tug)", &s.autoTug);
+    ImGui::Checkbox("Tự gửi yêu cầu kéo (tug)", &s.autoTug);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(140.0f);
     ImGui::SliderInt("kéo ms", &s.tugIntervalMs, 60, 600);
-    ImGui::Checkbox("Ép kéo thành công + sát thương max", &s.forceTugSuccess);
-    ImGui::Checkbox("Ép stun", &s.forceStun);
-    ImGui::Checkbox("Ép thu cá thành công", &s.forceCatch);
-    ImGui::Checkbox("Ép nâng cá (Lift)", &s.forceLift);
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Cá lớn / bóng cá (state >= 13)");
-    ImGui::TextDisabled("RaidEnter=13 Begin=15 Pumpin=16 Drag=17 Tug=18 Fighting=19 Catch=20 Stun=24");
-    ImGui::Checkbox("Tự quăng câu (cá lớn)", &s.bigAutoCast);
-    ImGui::Checkbox("Tự pumpin (bóng cá vùng vẫy)", &s.bigAutoPumpin);
-    ImGui::Checkbox("Tự drag (kéo bóng cá)", &s.bigAutoDrag);
+    ImGui::TextUnformatted("Cá to / bóng 6-7 (state >=13)");
+    ImGui::TextDisabled("Bắt buộc: LÔI (hit) -> KÉO (tug) -> stun");
+    ImGui::Checkbox("Tự lôi cá (RequestFishingHit)", &s.bigAutoDrag);
+    ImGui::SameLine();
+    ImGui::Checkbox("Lôi theo vị trí float", &s.bigDragUseFloatPos);
+    ImGui::Checkbox("Tự quăng câu sau khi xong", &s.bigAutoCast);
     ImGui::Checkbox("Tự tug minigame", &s.bigAutoTug);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(140.0f);
     ImGui::SliderInt("kéo ms##big", &s.bigTugIntervalMs, 60, 800);
     ImGui::Checkbox("Tự stun", &s.bigAutoStun);
-    ImGui::Checkbox("Ép mọi kết quả cá lớn thành công", &s.bigForceSuccess);
-    ImGui::Checkbox("Set HP cá lớn = 0", &s.bigZeroHp);
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Chỉ tự động thao tác — không ép kết quả, không set HP (server/game tự quyết).");
 
     ImGui::Separator();
     const auto& st = AutoCast::status();
-    ImGui::Text("Trạng thái: %d %s", st.currentState, st.isBigFish ? "(CÁ LỚN)" : "");
-    ImGui::Text("Quăng %llu | Cắn %llu | Kéo %llu | Stun %llu | Thu %llu",
+    const char* tierName = st.tier == AutoCast::ShadowTier::Big ? "CÁ TO (6-7)"
+                         : st.tier == AutoCast::ShadowTier::Small ? "CÁ BÉ (1-5)" : "?";
+    ImGui::Text("Trạng thái: %d | %s", st.currentState, tierName);
+    ImGui::Text("Quăng %llu | Cắn %llu | Kéo %llu | Stun %llu",
                 (unsigned long long)st.casts, (unsigned long long)st.bites,
-                (unsigned long long)st.tugs, (unsigned long long)st.stuns,
-                (unsigned long long)st.catches);
-    ImGui::Text("Cá lớn — Pumpin %llu | Drag %llu | Tug %llu",
-                (unsigned long long)st.bigPumpin, (unsigned long long)st.bigDrag,
-                (unsigned long long)st.bigTug);
-    if (st.serverRejected)
-        ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "Server từ chối lần quăng gần nhất");
+                (unsigned long long)st.tugs, (unsigned long long)st.stuns);
+    ImGui::Text("Cá to — Lôi %llu | Kéo %llu",
+                (unsigned long long)st.bigDrag, (unsigned long long)st.bigTug);
 }
 
 } // namespace
