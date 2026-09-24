@@ -70,6 +70,32 @@ inline bool ready() {
     return _domain_get != nullptr && _domain_get_assemblies != nullptr;
 }
 
+// Lọc con trỏ rác. User-space của tiến trình arm64 iOS: >= 4 GB, < 2^48,
+// luôn align 8. Rác thường là số nhỏ (0x135, 0x8…) hoặc lệch align.
+inline bool plausiblePtr(const void* p) {
+    if (!p) return false;
+    const uintptr_t v = reinterpret_cast<uintptr_t>(p);
+    return v >= 0x100000000ull && v < 0x0001000000000000ull && (v & 0x7) == 0;
+}
+
+// IL2CPP domain đã dựng xong chưa.
+//
+// QUAN TRỌNG: ready() chỉ nói "đã dlsym được symbol" — điều đó xảy ra ngay
+// khi UnityFramework vừa được load, TỚI RỒI TRƯỚC il2cpp_init(). Gọi
+// domain_get_assemblies lúc đó trả về mảng rác, và bản thân code il2cpp
+// deref con trỏ NULL -> SIGSEGV. Đã thấy thực tế trên iOS 27: app chết sau
+// 0.4s, far=0x135, 3 frame trong UnityFramework, thread bootstrap của ta.
+inline bool domainReady() {
+    if (!ready() || !_domain_get_assemblies) return false;
+    void* domain = _domain_get();
+    if (!plausiblePtr(domain)) return false;
+    size_t count = 0;
+    const void* assemblies = _domain_get_assemblies(domain, &count);
+    if (!assemblies || count == 0 || count > 4096) return false;
+    auto** arr = const_cast<void**>(reinterpret_cast<void* const*>(assemblies));
+    return plausiblePtr(arr[0]);
+}
+
 inline bool init() {
     _domain_get = (fn_domain_get)dlsym(RTLD_DEFAULT, "il2cpp_domain_get");
     _domain_get_assemblies = (fn_domain_get_assemblies)dlsym(RTLD_DEFAULT, "il2cpp_domain_get_assemblies");
@@ -125,20 +151,21 @@ struct ClassRef {
 // Duyệt toàn bộ class trong domain, gọi callback với từng class
 template <typename Fn>
 inline void forEachClass(Fn&& callback) {
-    if (!ready() || !_assembly_get_image || !_image_get_class_count || !_image_get_class) return;
+    if (!domainReady() || !_assembly_get_image || !_image_get_class_count || !_image_get_class) return;
     void* domain = _domain_get();
-    if (!domain) return;
     size_t count = 0;
     const void* assemblies = _domain_get_assemblies(domain, &count);
-    if (!assemblies) return;
+    if (!assemblies || count == 0 || count > 4096) return;
     auto** arr = const_cast<void**>(reinterpret_cast<void* const*>(assemblies));
     for (size_t i = 0; i < count; ++i) {
+        if (!plausiblePtr(arr[i])) continue;
         const void* image = _assembly_get_image(arr[i]);
-        if (!image) continue;
+        if (!plausiblePtr(image)) continue;
         const size_t n = _image_get_class_count(image);
+        if (n > 200000) continue;  // số class vô lý = image chưa sẵn sàng
         for (size_t c = 0; c < n; ++c) {
             void* k = _image_get_class(image, c);
-            if (!k) continue;
+            if (!plausiblePtr(k)) continue;
             const char* kn = _class_get_name ? _class_get_name(k) : nullptr;
             if (!kn) continue;
             const char* ksp = _class_get_namespace ? _class_get_namespace(k) : nullptr;

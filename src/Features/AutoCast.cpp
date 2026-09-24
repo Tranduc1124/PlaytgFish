@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#include "../Core/crashguard.hpp"
 #include "../Core/hooker.hpp"
 #include "../Core/il2cpp.hpp"
 #include "../Core/log.hpp"
@@ -222,12 +223,22 @@ void resolveAll() {
     }
 }
 
+void resolveAllEntry() { resolveAll(); }
+
+// Gọi resolveAll() có bẫy lỗi: nếu code game lỗi thì chỉ log, không làm sập app.
+void resolveAllSafe() { CrashGuard::run(resolveAllEntry, "resolveAll"); }
+
 void* bootstrapThread(void* /*arg*/) {
     for (int i = 0; i < 600; ++i) { // ~5 phút
         if (!Il2Cpp::ready()) {
             Il2Cpp::init();
+        } else if (!Il2Cpp::domainReady()) {
+            // Unity mới load xong, il2cpp_init() chưa xong -> TUYỆT ĐỐI chưa
+            // được đụng domain, gọi sớm là crash (xem domainReady()).
+            if (i % 4 == 0) PF_LOG("[boot] đợi Unity khởi tạo xong domain IL2CPP… (~%ds)", i / 2);
         } else if (!g_hooksInstalled) {
-            resolveAll();
+            PF_LOG("[boot] domain IL2CPP sẵn sàng -> bắt đầu resolve + hook");
+            resolveAllSafe();
             if (g_hooksInstalled) break;
         } else {
             break;
@@ -283,7 +294,7 @@ void bootstrap() {
 void tick() {
     if (!g_cfg.enabled) return;
     if (!g_hooksInstalled) {
-        if (Il2Cpp::ready()) resolveAll();
+        if (Il2Cpp::domainReady()) resolveAllSafe();
         return;
     }
     if (!g_controlClass) return;

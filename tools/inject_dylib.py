@@ -31,7 +31,9 @@ class MachO:
         self.path = path
         with open(path, "rb") as f:
             self.data = bytearray(f.read())
-        magic, _, _, _, self.ncmds, self.sizeofcmds = struct.unpack_from("<IiiIIII", self.data, 0)
+        # mach_header_64: magic, cputype, cpusubtype, filetype, ncmds, sizeofcmds, flags, reserved
+        (magic, _, _, _, self.ncmds, self.sizeofcmds, _, _) = struct.unpack_from(
+            "<IiiIIIII", self.data, 0)
         if magic != MH_MAGIC_64:
             raise SystemExit(f"!! không phải Mach-O 64-bit: magic=0x{magic:x}")
         self.lc_end = 32 + self.sizeofcmds
@@ -54,14 +56,28 @@ class MachO:
         return out
 
     def first_data_offset(self) -> int:
-        """Offset file nhỏ nhất mà dữ liệu segment bắt đầu (để biết chỗ trống)."""
+        """Offset file nhỏ nhất mà dữ liệu THỰC SỰ bắt đầu (để biết chỗ trống).
+
+        Không được dùng fileoff của segment: __TEXT luôn có fileoff=0 vì nó phủ
+        luôn mach header (và vmaddr lại khác 0), nên cách đó ra số âm.
+        Chỉ dùng offset của section đầu tiên có dữ liệu thật (thường __text ở 0x4000).
+        """
+        zerofill = (0x1, 0xC, 0x12)  # S_ZEROFILL, S_GB_ZEROFILL, S_THREAD_LOCAL_ZEROFILL
         best = len(self.data)
-        for _, off, cmd, cmdsize in self.commands():
-            if cmd == LC_SEGMENT_64:
-                fileoff = struct.unpack_from("<Q", self.data, off + 40)[0]
-                filesize = struct.unpack_from("<Q", self.data, off + 48)[0]
-                if filesize and fileoff < best:
-                    best = fileoff
+        for _, off, cmd, _ in self.commands():
+            if cmd != LC_SEGMENT_64:
+                continue
+            nsects = struct.unpack_from("<I", self.data, off + 64)[0]
+            for i in range(nsects):
+                b = off + 72 + i * 80
+                if b + 80 > len(self.data):
+                    break
+                size = struct.unpack_from("<Q", self.data, b + 40)[0]
+                offset = struct.unpack_from("<I", self.data, b + 48)[0]
+                flags = struct.unpack_from("<I", self.data, b + 64)[0]
+                if size == 0 or offset == 0 or (flags & 0xFF) in zerofill:
+                    continue
+                best = min(best, offset)
         return best
 
     def remove_load_dylib(self, target: str) -> bool:
