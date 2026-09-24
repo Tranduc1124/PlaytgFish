@@ -30,11 +30,17 @@ IMGUI_SRCS := $(IMGUI_DIR)/imgui.cpp \
 #  Sources
 # ------------------------------------------------------------------ #
 PlayFish_FILES := src/main.mm \
-                  src/GUI/Overlay.mm \
-                  src/GUI/Menu.cpp \
+                  src/Core/Offsets.cpp \
+                  src/Core/paths.mm \
                   src/Features/AutoFish.cpp \
                   src/Features/FeatureManager.cpp \
+                  src/Features/Discovery.cpp \
+                  src/Features/Overrides.cpp \
                   src/Features/Watcher.cpp \
+                  src/GUI/Gesture.mm \
+                  src/GUI/Gui.mm \
+                  src/GUI/Overlay.mm \
+                  src/GUI/Menu.cpp \
                   $(IMGUI_SRCS)
 
 PlayFish_CCFLAGS := -std=c++17 -Wno-deprecated-declarations -Wno-unused-function

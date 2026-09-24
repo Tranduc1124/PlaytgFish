@@ -3,15 +3,11 @@
 #import <unistd.h>
 
 #include "Config.hpp"
-#include "Core/hooker.hpp"
 #include "Core/il2cpp.hpp"
 #include "Core/log.hpp"
-#include "Core/patcher.hpp"
 #include "Core/target.hpp"
 #include "Core/version.hpp"
-#include "Features/AutoFish.hpp"
-#include "Features/FeatureManager.hpp"
-#include "GUI/Overlay.hpp"
+#include "GUI/Gui.hpp"
 
 namespace PF {
 Config g_cfg; // định nghĩa duy nhất
@@ -35,9 +31,7 @@ __attribute__((constructor)) static void playfish_entry() {
 
         PF::Il2Cpp::init();
 
-        // Overlay cài trên main thread (nối vào CAMetalLayer của game).
-        dispatch_async(dispatch_get_main_queue(), ^{
-            PF::Overlay::install();
-        });
+        // Khởi động GUI (gesture + overlay ImGui/Metal)
+        PF::Gui::startup();
     });
 }

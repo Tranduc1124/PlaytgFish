@@ -1,185 +1,137 @@
 #include "AutoFish.hpp"
 
+#include <cstring>
+#include <vector>
+
 #include "../Config.hpp"
+#include "../Core/Offsets.hpp"
 #include "../Core/hooker.hpp"
 #include "../Core/il2cpp.hpp"
 #include "../Core/log.hpp"
 #include "../Core/patcher.hpp"
 #include "../Core/target.hpp"
-#include "FishingSpec.hpp"
+#include "Discovery.hpp"
 #include "FeatureManager.hpp"
+#include "Overrides.hpp"
+
 namespace PF::AutoFish {
 namespace {
 
-// ---------------------------------------------------------------------
-//  Detour dùng chung. Vì chưa biết chữ ký C# chính xác, ta dùng prototype
-//  8 tham số (AArch64: x0..x7) và trả về uintptr_t — x0 sau lời gọi hàm gốc
-//  chính là return value. Hàm nào trả void thì x0 là rác (vô hại).
-//
-//  Khi đã biết chữ ký thật (xem docs/FIND_HOOKS.md), thay bằng detour riêng
-//  với prototype chính xác để ép giá trị trả về cho chắc ăn.
-// ---------------------------------------------------------------------
-using AnyFn = uintptr_t (*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
-                            uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+bool g_enabled = false;
+std::vector<void*> g_overrideTargets; // các target đã override (để gỡ khi tắt)
+bool g_cooldownPatched = false;
 
-AnyFn g_origCheck = nullptr;  // Role::Check  (instant bite)
-AnyFn g_origReel = nullptr;   // Role::Reel   (perfect reel)
-AnyFn g_origGeneric = nullptr; // Role::Generic (chỉ log)
-
-struct Slot {
-    void* target = nullptr;
-    const char* label = nullptr;
-    bool active = false;
-};
-Slot g_slots[3];
-
-// --- Role::Check: ép trả true khi bật instant bite (vd: CheckBite) ---
-uintptr_t detourCheck(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-                      uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    if (g_cfg.instantBite) {
-        static uint64_t tick = 0;
-        if ((tick++ % 120) == 0) // log thưa thớt để khỏi spam
-            PF_LOG("[fish] Check -> forced true (instant bite)");
-        return 1; // coi như cá đã cắn
+// Tìm ứng viên đầu tiên có native pointer, ưu tiên điểm cao
+const Discovery::Candidate* bestCandidate(const std::vector<Discovery::Candidate>& list,
+                                          const char* role) {
+    for (const auto& c : list) {
+        if (role && c.role && strcmp(c.role, role) == 0)
+            return &c;
     }
-    return g_origCheck ? g_origCheck(a0, a1, a2, a3, a4, a5, a6, a7) : 0;
+    return list.empty() ? nullptr : &list.front();
 }
 
-// --- Role::Reel: ép trả "thành công" khi bật perfect reel ---
-// success trong game thường là 0 (enum) — ép về 0, giá trị mặc định.
-uintptr_t detourReel(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-                     uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    uintptr_t ret = g_origReel ? g_origReel(a0, a1, a2, a3, a4, a5, a6, a7) : 0;
-    if (g_cfg.perfectReel) {
-        static uint64_t tick = 0;
-        if ((tick++ % 120) == 0)
-            PF_LOG("[fish] Reel -> %lu (perfect reel forced)", (unsigned long)ret);
-        return 0; // success
-    }
-    return ret;
-}
-
-// --- Role::Generic: chỉ quan sát ---
-uintptr_t detourGeneric(uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
-                        uintptr_t a4, uintptr_t a5, uintptr_t a6, uintptr_t a7) {
-    uintptr_t ret = g_origGeneric ? g_origGeneric(a0, a1, a2, a3, a4, a5, a6, a7) : 0;
-    static uint64_t tick = 0;
-    if ((tick++ % 200) == 0)
-        PF_LOG("[fish] generic call self=%p ret=0x%lx", (void*)a0, (unsigned long)ret);
-    return ret;
-}
-
-void* resolveTarget(const Spec::Method& m) {
-    // 1) ưu tiên offset nếu có
-    if (m.rva != 0) {
-        void* t = rva(m.rva);
-        if (t) return t;
-    }
-    // 2) resolve theo tên
-    if (m.klass && m.method) {
-        auto ref = Il2Cpp::resolve(m.klass, m.method, m.nsp, m.argc);
-        if (ref.fnptr) return ref.fnptr;
-    }
-    return nullptr;
-}
-
-// ---------------------------------------------------------------------
-//  Feature thật
-// ---------------------------------------------------------------------
-class AutoFishFeature : public Feature {
-public:
-    const char* name() const override { return "auto_fish"; }
-    const char* title() const override { return "Auto Fishing"; }
-    const char* description() const override {
-        return "Hook cac ham lien quan ca cua Play Together (Unity IL2CPP)";
-    }
-
-    bool install() override {
-        if (m_installed) return true;
-
-        int hooked = 0;
-        for (const auto& m : Spec::kFishing) {
-            void* target = resolveTarget(m);
-            if (!target) {
-                PF_LOG("[fish] chua tim thay %s::%s (can dien ten/rva trong FishingSpec.hpp)",
-                       m.klass, m.method);
-                continue;
-            }
-
-            int slot = -1;
-            void* replacement = nullptr;
-            void** origSlot = nullptr;
-
-            switch (m.role) {
-                case Spec::Role::Check:
-                    if (g_slots[0].active) { PF_LOG("[fish] slot Check đã dùng, bỏ %s", m.method); continue; }
-                    slot = 0; replacement = (void*)detourCheck; origSlot = (void**)&g_origCheck; break;
-                case Spec::Role::Reel:
-                    if (g_slots[1].active) { PF_LOG("[fish] slot Reel đã dùng, bỏ %s", m.method); continue; }
-                    slot = 1; replacement = (void*)detourReel; origSlot = (void**)&g_origReel; break;
-                default:
-                    if (g_slots[2].active) { PF_LOG("[fish] slot Generic đã dùng, bỏ %s", m.method); continue; }
-                    slot = 2; replacement = (void*)detourGeneric; origSlot = (void**)&g_origGeneric; break;
-            }
-
-            if (PF::hook(m.method, target, replacement, origSlot)) {
-                g_slots[slot] = {target, m.method, true};
-                ++hooked;
-            }
+// Cài override theo offset đã biết (nếu có), ngược lại dùng discovery
+bool installBiteOverride() {
+    // 1) offset thủ công trong registry
+    const uintptr_t rva = OffsetRegistry::get().get("fishing.bite_check");
+    if (rva) {
+        void* target = PF::rva(rva);
+        if (target && Overrides::add(target, Overrides::Mode::ForceTrue, 1, "bite_check(rva)")) {
+            g_overrideTargets.push_back(target);
+            return true;
         }
-
-        // Tuỳ chọn: bỏ cooldown qua patch (nếu đã biết RVA)
-        if (g_cfg.noCooldown) {
-            // TODO: sau khi có offset cooldown, gọi PF::nopRva(...)
-            PF_LOG("[fish] noCooldown: chua co offset, chi ghi nhanh");
-        }
-
-        m_installed = hooked > 0;
-        PF_LOG("[fish] installed=%d hook(s)", hooked);
-        return m_installed;
     }
-
-    void uninstall() override {
-        for (int i = 0; i < 3; ++i) {
-            if (g_slots[i].active && g_slots[i].target) {
-                PF::removeHook(g_slots[i].target);
-                g_slots[i] = {nullptr, nullptr, false};
-            }
-        }
-        g_origCheck = g_origReel = g_origGeneric = nullptr;
-        m_installed = false;
+    // 2) tự tìm qua metadata
+    auto list = Discovery::scan(Discovery::kClassKeywords, 400);
+    const auto* c = bestCandidate(list, "bite");
+    if (!c || !c->fnptr) return false;
+    if (Overrides::add(c->fnptr, Overrides::Mode::ForceTrue, 1,
+                       c->klass + "::" + c->method)) {
+        g_overrideTargets.push_back(c->fnptr);
+        return true;
     }
+    return false;
+}
 
-    bool installed() const override { return m_installed; }
+bool installReelOverride() {
+    const uintptr_t rva = OffsetRegistry::get().get("fishing.reel_result");
+    if (rva) {
+        void* target = PF::rva(rva);
+        if (target && Overrides::add(target, Overrides::Mode::ForceFalse, 0, "reel_result(rva)")) {
+            g_overrideTargets.push_back(target);
+            return true;
+        }
+    }
+    auto list = Discovery::scan(Discovery::kClassKeywords, 400);
+    const auto* c = bestCandidate(list, "result");
+    if (!c || !c->fnptr) return false;
+    if (Overrides::add(c->fnptr, Overrides::Mode::ForceFalse, 0,
+                       c->klass + "::" + c->method)) {
+        g_overrideTargets.push_back(c->fnptr);
+        return true;
+    }
+    return false;
+}
 
-private:
-    bool m_installed = false;
-};
+void installCooldownPatch() {
+    const uintptr_t rva = OffsetRegistry::get().get("fishing.cast_cooldown");
+    if (!rva) {
+        PF_LOG("[fish] noCooldown: chưa có offset fishing.cast_cooldown");
+        return;
+    }
+    if (PF::nopRva(rva, 1)) {
+        g_cooldownPatched = true;
+        PF_LOG("[fish] noCooldown: đã nop cooldown @ rva 0x%lx", (unsigned long)rva);
+    }
+}
 
-AutoFishFeature g_autoFish;
-bool g_registered = false;
+void uninstallCooldownPatch() {
+    if (g_cooldownPatched) {
+        restoreAllPatches();
+        g_cooldownPatched = false;
+    }
+}
 
 } // namespace
 
 void setEnabled(bool on) {
-    if (!g_registered) {
-        FeatureManager::get().add(&g_autoFish);
-        g_registered = true;
-    }
+    if (on == g_enabled) return;
+    g_enabled = on;
     if (on) {
-        FeatureManager::get().install("auto_fish");
+        install();
     } else {
-        FeatureManager::get().uninstall("auto_fish");
+        uninstall();
     }
-    g_cfg.autoFish = on;
 }
 
 bool enabled() {
-    return FeatureManager::get().isInstalled("auto_fish");
+    return g_enabled;
 }
 
 void install() {
-    setEnabled(true);
+    PF_LOG("[fish] cài đặt...");
+
+    bool ok = false;
+    if (g_cfg.instantBite)
+        ok = installBiteOverride() || ok;
+    if (g_cfg.perfectReel)
+        ok = installReelOverride() || ok;
+    if (g_cfg.noCooldown)
+        installCooldownPatch();
+
+    PF_LOG("[fish] hoàn tất (override=%zu, cooldown_patch=%s)",
+           g_overrideTargets.size(), g_cooldownPatched ? "có" : "không");
+    (void)ok;
+}
+
+void uninstall() {
+    for (void* t : g_overrideTargets) {
+        PF::removeHook(t);
+    }
+    g_overrideTargets.clear();
+    uninstallCooldownPatch();
+    PF_LOG("[fish] đã gỡ toàn bộ hook/patch của auto-fish");
 }
 
 } // namespace PF::AutoFish

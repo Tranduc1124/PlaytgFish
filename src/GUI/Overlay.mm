@@ -12,6 +12,7 @@
 
 #import "../Config.hpp"
 #import "../Core/log.hpp"
+#import "Gui.hpp"
 #import "Menu.hpp"
 
 namespace PF::Overlay {
@@ -102,6 +103,7 @@ void renderInto(id<MTLCommandBuffer> commandBuffer, id<CAMetalDrawable> drawable
         if (data && data->CmdLists.Size > 0)
             ImGui_ImplMetal_RenderDrawData(data, commandBuffer, encoder);
 
+        Gui::noteFrame();
         [encoder endEncoding];
     }
 }
