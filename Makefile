@@ -1,9 +1,11 @@
 export THEOS ?= /home/tduck/theos
 
 export ARCHS = arm64
-# SDK 16.5 để build được cả khi Theos dùng SDK bị lược bớt (CI macOS dùng SDK Xcode).
-# Muốn đổi: make TARGET=iphone:clang:latest:17.0
-export TARGET = iphone:clang:16.5:14.0
+
+# SDK cho build cục bộ (WSL/Theos đã cài sẵn iPhoneOS16.5.sdk).
+# Dùng "?=" để CI (macOS runner, SDK của Xcode) ghi đè được:
+#     make TARGET=iphone:clang:latest:17.0
+export TARGET ?= iphone:clang:16.5:14.0
 export FINALPACKAGE = 1
 
 include $(THEOS)/makefiles/common.mk

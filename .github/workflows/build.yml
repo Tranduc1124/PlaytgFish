@@ -37,7 +37,8 @@ jobs:
       - name: Build
         run: |
           make clean
-          make FINALPACKAGE=1
+          # macOS runner dùng SDK của Xcode nên ghi đè TARGET
+          make TARGET=iphone:clang:latest:17.0 FINALPACKAGE=1
           ls -la .theos/obj/PlayFish.dylib
 
       - name: Inspect Mach-O
