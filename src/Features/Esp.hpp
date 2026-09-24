@@ -33,6 +33,9 @@ void shutdown();
 bool enabled();
 void setEnabled(bool on);
 
+// Bật ESP nếu cấu hình đã lưu yêu cầu bật (dùng lúc bootstrap, trả false nếu chưa bật)
+bool setEnabledIfConfigured();
+
 // Làm mới danh sách + tính toạ độ (gọi mỗi frame từ render thread)
 void update();
 

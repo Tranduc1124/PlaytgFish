@@ -6,6 +6,7 @@
 
 #include "../Config.hpp"
 #include "../Core/Offsets.hpp"
+#include "../Core/SettingsStore.hpp"
 #include "../Core/hooker.hpp"
 #include "../Core/il2cpp.hpp"
 #include "../Core/log.hpp"
@@ -16,8 +17,8 @@
 #include "../Features/Discovery.hpp"
 #include "../Features/Esp.hpp"
 #include "../Features/FeatureManager.hpp"
+#include "../Features/AutoCast.hpp"
 #include "../Features/FishingAuto.hpp"
-#include "../Features/FishingHooks.hpp"
 #include "../Features/Overrides.hpp"
 #include "Gui.hpp"
 
@@ -289,16 +290,11 @@ void tabDebug() {
 //  Tab Fish: ép field của FishingSystem (offset resolve theo tên)
 // ---------------------------------------------------------------------
 void tabFishFields() {
-    if (!FishingAuto::ready() && ImGui::Button("Resolve FishingSystem")) {
-        FishingAuto::setup();
-    }
-
     bool on = FishingAuto::enabled();
-    if (ImGui::Checkbox("Bật auto-fishing", &on)) {
+    if (ImGui::Checkbox("Bật đọc/ghi field FishingSystem", &on)) {
         FishingAuto::setEnabled(on);
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("(ép field trong FishingSystem mỗi 200ms)");
+    ImGui::TextDisabled("(công cụ debug — xem/ghi field theo tên)");
 
     ImGui::Spacing();
     auto& flags = FishingAuto::flags();
@@ -325,10 +321,6 @@ void tabFishFields() {
 //  Tab ESP: khung người chơi khác
 // ---------------------------------------------------------------------
 void tabEsp() {
-    if (!Esp::ready() && ImGui::Button("Resolve ActorSystem / Camera")) {
-        Esp::setup();
-    }
-
     bool on = Esp::enabled();
     if (ImGui::Checkbox("Bật ESP", &on)) {
         Esp::setEnabled(on);
@@ -354,50 +346,61 @@ void tabEsp() {
 }
 
 // ---------------------------------------------------------------------
-//  Tab Hooks Câu Cá: hook đúng chữ ký lấy từ dump.cs
+//  Tab Auto Cast: quăng câu -> cắn -> kéo -> thu (tất cả trong 1 chỗ)
 // ---------------------------------------------------------------------
-void tabFishingHooks() {
-    if (!FishingHooks::ready() && ImGui::Button("Resolve ActorDefaultControlPlayer")) {
-        FishingHooks::setup();
-    }
+void tabAutoCast() {
+    auto& s = AutoCast::settings();
 
-    bool master = FishingHooks::enabled();
-    if (ImGui::Checkbox("Bật hook câu cá", &master)) {
-        FishingHooks::setEnabled(master);
-    }
+    ImGui::Checkbox("BẬT TỰ ĐỘNG CÂU", &s.enabled);
+    ImGui::SameLine();
+    if (!AutoCast::ready())
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "đang tự hook…");
+    else
+        ImGui::TextDisabled("đã hook xong");
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Hook (ActorDefaultControlPlayer)");
-    if (ImGui::BeginTable("fishhooks", 4,
-                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg, ImVec2(0, 240))) {
-        ImGui::TableSetupColumn("Method");
-        ImGui::TableSetupColumn("Address");
-        ImGui::TableSetupColumn("Calls");
-        ImGui::TableSetupColumn("Ép");
-        ImGui::TableHeadersRow();
+    ImGui::TextUnformatted("Cá thường (state 0-12)");
+    ImGui::Checkbox("Tự quăng câu", &s.autoCast);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::SliderInt("nhịp ms", &s.castIntervalMs, 500, 5000);
+    ImGui::Checkbox("Ép cast thành công", &s.forceCastSuccess);
+    ImGui::Checkbox("Tự kích hoạt cắn (bite)", &s.autoBite);
+    ImGui::Checkbox("Tự kéo (tug)", &s.autoTug);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::SliderInt("kéo ms", &s.tugIntervalMs, 60, 600);
+    ImGui::Checkbox("Ép kéo thành công + sát thương max", &s.forceTugSuccess);
+    ImGui::Checkbox("Ép stun", &s.forceStun);
+    ImGui::Checkbox("Ép thu cá thành công", &s.forceCatch);
+    ImGui::Checkbox("Ép nâng cá (Lift)", &s.forceLift);
 
-        for (int i = 0; i < static_cast<int>(FishingHooks::HookId::Count); ++i) {
-            const auto id = static_cast<FishingHooks::HookId>(i);
-            const auto& st = FishingHooks::state(id);
-            ImGui::PushID(i);
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(FishingHooks::name(id));
-            ImGui::TableNextColumn();
-            ImGui::Text("0x%lx", reinterpret_cast<uintptr_t>(st.target));
-            ImGui::TableNextColumn();
-            ImGui::Text("%llu", static_cast<unsigned long long>(st.calls));
-            ImGui::TableNextColumn();
-            bool on = FishingHooks::hookEnabled(id);
-            if (ImGui::Checkbox("##f", &on))
-                FishingHooks::setHookEnabled(id, on);
-            ImGui::PopID();
-        }
-        ImGui::EndTable();
-    }
+    ImGui::Separator();
+    ImGui::TextUnformatted("Cá lớn / bóng cá (state >= 13)");
+    ImGui::TextDisabled("RaidEnter=13 Begin=15 Pumpin=16 Drag=17 Tug=18 Fighting=19 Catch=20 Stun=24");
+    ImGui::Checkbox("Tự quăng câu (cá lớn)", &s.bigAutoCast);
+    ImGui::Checkbox("Tự pumpin (bóng cá vùng vẫy)", &s.bigAutoPumpin);
+    ImGui::Checkbox("Tự drag (kéo bóng cá)", &s.bigAutoDrag);
+    ImGui::Checkbox("Tự tug minigame", &s.bigAutoTug);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    ImGui::SliderInt("kéo ms##big", &s.bigTugIntervalMs, 60, 800);
+    ImGui::Checkbox("Tự stun", &s.bigAutoStun);
+    ImGui::Checkbox("Ép mọi kết quả cá lớn thành công", &s.bigForceSuccess);
+    ImGui::Checkbox("Set HP cá lớn = 0", &s.bigZeroHp);
 
-    ImGui::TextWrapped("ReceiveCastingResult/ReceiveFishingBegin ép castSuccess=true; "
-                       "CatchResult ép success=true; HitResult ép Hit(1).");
+    ImGui::Separator();
+    const auto& st = AutoCast::status();
+    ImGui::Text("Trạng thái: %d %s", st.currentState, st.isBigFish ? "(CÁ LỚN)" : "");
+    ImGui::Text("Quăng %llu | Cắn %llu | Kéo %llu | Stun %llu | Thu %llu",
+                (unsigned long long)st.casts, (unsigned long long)st.bites,
+                (unsigned long long)st.tugs, (unsigned long long)st.stuns,
+                (unsigned long long)st.catches);
+    ImGui::Text("Cá lớn — Pumpin %llu | Drag %llu | Tug %llu",
+                (unsigned long long)st.bigPumpin, (unsigned long long)st.bigDrag,
+                (unsigned long long)st.bigTug);
+    if (st.serverRejected)
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "Server từ chối lần quăng gần nhất");
 }
 
 } // namespace
@@ -419,6 +422,7 @@ static void drawEspOverlay() {
 
 void draw() {
     // Cập nhật dữ liệu trước khi vẽ (render thread)
+    AutoCast::tick();
     FishingAuto::tick();
     Esp::update();
     drawEspOverlay();
@@ -432,7 +436,7 @@ void draw() {
     }
 
     if (ImGui::BeginTabBar("tabs")) {
-        if (ImGui::BeginTabItem("Fish Hooks")) { tabFishingHooks(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Auto Cast")) { tabAutoCast(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Fish")) { tabFishFields(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Auto Fish")) { tabAutoFish(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("ESP")) { tabEsp(); ImGui::EndTabItem(); }
@@ -444,8 +448,12 @@ void draw() {
     }
 
     ImGui::Separator();
-    ImGui::TextDisabled("PlayFish - Unity IL2CPP (Dobby + ImGui/Metal) | chạm 3 ngon để đóng menu");
+    ImGui::TextDisabled("PlayFish - Unity IL2CPP (Dobby + ImGui/Metal) | chạm 3 ngon để mở menu");
+    const bool closing = !g_cfg.showMenu;
     ImGui::End();
+
+    // tự lưu cấu hình khi người dùng đóng menu
+    if (closing) SettingsStore::save();
 }
 
 } // namespace PF::Menu

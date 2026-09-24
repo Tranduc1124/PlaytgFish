@@ -154,6 +154,14 @@ void setEnabled(bool on) {
         update();
 }
 
+bool setEnabledIfConfigured() {
+    if (!g_enabled) return true; // không cần bật -> xem như đã xong
+    if (!setup()) return false;   // thử lại vòng sau
+    g_enabled = true;
+    update();
+    return true;
+}
+
 size_t playerCount() {
     return g_players.size();
 }

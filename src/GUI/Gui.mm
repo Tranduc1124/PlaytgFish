@@ -5,11 +5,13 @@
 
 #include "../Config.hpp"
 #include "../Core/Offsets.hpp"
+#include "../Core/SettingsStore.hpp"
 #include "../Core/il2cpp.hpp"
 #include "../Core/log.hpp"
 #include "../Core/paths.hpp"
 #include "../Core/target.hpp"
-#include "../Features/AutoFish.hpp"
+#include "../Features/AutoCast.hpp"
+#include "../Features/Esp.hpp"
 #include "Gesture.hpp"
 #include "Overlay.hpp"
 #include "Touch.hpp"
@@ -40,7 +42,20 @@ void startup() {
     PF_LOG("[gui] startup");
 
     registerBuiltinOffsets();
-    OffsetRegistry::get().load(); // đọc file nếu người dùng đã sửa offset
+    OffsetRegistry::get().load();     // đọc file nếu người dùng đã sửa offset
+    SettingsStore::load();             // nạp cấu hình đã lưu (vào game là chạy)
+
+    // Tự hook nền: thử liên tục tới khi game load xong metadata.
+    // Người dùng không cần bấm nút nào — vào game là tự chạy.
+    PF::AutoCast::bootstrap();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (int i = 0; i < 300; ++i) {
+            if (Il2Cpp::ready()) {
+                if (PF::Esp::setEnabledIfConfigured()) break;
+            }
+            [NSThread sleepForTimeInterval:0.5];
+        }
+    });
 
     // Gesture + touch phải cài trên main thread (UIKit)
     dispatch_async(dispatch_get_main_queue(), ^{

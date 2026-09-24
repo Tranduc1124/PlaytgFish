@@ -31,13 +31,14 @@ IMGUI_SRCS := $(IMGUI_DIR)/imgui.cpp \
 # ------------------------------------------------------------------ #
 PlayFish_FILES := src/main.mm \
                   src/Core/Offsets.cpp \
+                  src/Core/SettingsStore.cpp \
                   src/Core/paths.mm \
                   src/Features/AutoFish.cpp \
                   src/Features/FeatureManager.cpp \
                   src/Features/Discovery.cpp \
                   src/Features/Overrides.cpp \
                   src/Features/FishingAuto.cpp \
-                  src/Features/FishingHooks.cpp \
+                  src/Features/AutoCast.cpp \
                   src/Features/Esp.cpp \
                   src/Features/Watcher.cpp \
                   src/GUI/Gesture.mm \
