@@ -9,6 +9,7 @@
 #include "../Core/il2cpp.hpp"
 #include "../Core/log.hpp"
 #include "../Core/target.hpp"
+#include "Esp.hpp"
 
 namespace PF::AutoCast {
 namespace {
@@ -299,6 +300,12 @@ void* bootstrapThread(void* /*arg*/) {
         usleep(500 * 1000);
     }
     g_bootstrapRunning = false;
+
+    // ESP cũng do cùng luồng này lo (hàm tự trả về true ngay nếu không cần bật)
+    // — tránh hai luồng cùng DobbyHook một địa chỉ.
+    for (int i = 0; i < 20 && !Esp::setEnabledIfConfigured(); ++i)
+        usleep(500 * 1000);
+
     return nullptr;
 }
 

@@ -45,17 +45,9 @@ void startup() {
     OffsetRegistry::get().load();     // đọc file nếu người dùng đã sửa offset
     SettingsStore::load();             // nạp cấu hình đã lưu (vào game là chạy)
 
-    // Tự hook nền: thử liên tục tới khi game load xong metadata.
-    // Người dùng không cần bấm nút nào — vào game là tự chạy.
+    // Tự hook nền: một luồng duy nhất chịu trách nhiệm resolve/hook cho
+    // toàn bộ tính năng (AutoCast + ESP). Người dùng không bấm gì cả.
     PF::AutoCast::bootstrap();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        for (int i = 0; i < 300; ++i) {
-            if (Il2Cpp::ready()) {
-                if (PF::Esp::setEnabledIfConfigured()) break;
-            }
-            [NSThread sleepForTimeInterval:0.5];
-        }
-    });
 
     // Gesture + touch phải cài trên main thread (UIKit)
     dispatch_async(dispatch_get_main_queue(), ^{
