@@ -25,6 +25,8 @@ jobs:
           # Theos cần Xcode CLT — macOS runner đã có sẵn
           xcode-select -p
           "$THEOS/bin/install_theos_tools.sh" || echo "install_theos_tools bỏ qua (không cần cho library target)"
+          # ldid: Theos dùng để ký ad-hoc dylib, macOS runner không có sẵn
+          brew install ldid || echo "brew install ldid thất bại"
 
       - name: Cache libs
         uses: actions/cache@v4
