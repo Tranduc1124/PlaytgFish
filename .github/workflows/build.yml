@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# cần quyền tạo Release để đẩy dylib lên trang Releases
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build arm64 dylib
@@ -53,9 +57,30 @@ jobs:
           echo "--- install_name ---"
           otool -D .theos/obj/PlayFish.dylib
 
-      - name: Upload dylib
+      - name: Upload dylib (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: PlayFish-dylib
           path: .theos/obj/PlayFish.dylib
           if-no-files-found: error
+
+      # Đẩy thẳng file .dylib (KHÔNG zip) lên trang Releases
+      # https://github.com/Tranduc1124/PlaytgFish/releases
+      - name: Publish dylib to Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="auto"
+          DYLIB=".theos/obj/PlayFish.dylib"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DYLIB" --clobber
+            gh release edit "$TAG" --notes "Auto build từ commit ${GITHUB_SHA::8} ($(date -u '+%Y-%m-%d %H:%M UTC'))."
+            echo "::notice::đã cập nhật dylib trong release $TAG"
+          else
+            gh release create "$TAG" "$DYLIB" \
+              --title "PlayFish dylib (auto build)" \
+              --notes "Dylib arm64 tự động build mỗi lần push. Commit: ${GITHUB_SHA::8}" \
+              --latest
+            echo "::notice::đã tạo release $TAG"
+          fi
