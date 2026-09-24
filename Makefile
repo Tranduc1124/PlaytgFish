@@ -36,8 +36,12 @@ PlayFish_FILES := src/main.mm \
                   src/Features/FeatureManager.cpp \
                   src/Features/Discovery.cpp \
                   src/Features/Overrides.cpp \
+                  src/Features/FishingAuto.cpp \
+                  src/Features/FishingHooks.cpp \
+                  src/Features/Esp.cpp \
                   src/Features/Watcher.cpp \
                   src/GUI/Gesture.mm \
+                  src/GUI/Touch.mm \
                   src/GUI/Gui.mm \
                   src/GUI/Overlay.mm \
                   src/GUI/Menu.cpp \

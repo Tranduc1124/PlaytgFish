@@ -14,7 +14,10 @@
 #include "../Core/version.hpp"
 #include "../Features/AutoFish.hpp"
 #include "../Features/Discovery.hpp"
+#include "../Features/Esp.hpp"
 #include "../Features/FeatureManager.hpp"
+#include "../Features/FishingAuto.hpp"
+#include "../Features/FishingHooks.hpp"
 #include "../Features/Overrides.hpp"
 #include "Gui.hpp"
 
@@ -282,9 +285,144 @@ void tabDebug() {
     ImGui::EndChild();
 }
 
+// ---------------------------------------------------------------------
+//  Tab Fish: ép field của FishingSystem (offset resolve theo tên)
+// ---------------------------------------------------------------------
+void tabFishFields() {
+    if (!FishingAuto::ready() && ImGui::Button("Resolve FishingSystem")) {
+        FishingAuto::setup();
+    }
+
+    bool on = FishingAuto::enabled();
+    if (ImGui::Checkbox("Bật auto-fishing", &on)) {
+        FishingAuto::setEnabled(on);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(ép field trong FishingSystem mỗi 200ms)");
+
+    ImGui::Spacing();
+    auto& flags = FishingAuto::flags();
+    if (flags.empty()) {
+        ImGui::TextWrapped("Chưa tìm thấy field nào. Bấm 'Resolve FishingSystem' "
+                           "(cần vào game đã load xong).");
+        return;
+    }
+
+    ImGui::TextUnformatted("Field tìm thấy trong FishingSystem");
+    ImGui::Separator();
+    for (const auto& f : flags) {
+        ImGui::PushID(f.name.c_str());
+        bool forced = f.forced;
+        if (ImGui::Checkbox(f.name.c_str(), &forced))
+            FishingAuto::setFlagForced(f.name, forced);
+        ImGui::SameLine();
+        ImGui::TextDisabled("offset 0x%lx", (unsigned long)f.offset);
+        ImGui::PopID();
+    }
+}
+
+// ---------------------------------------------------------------------
+//  Tab ESP: khung người chơi khác
+// ---------------------------------------------------------------------
+void tabEsp() {
+    if (!Esp::ready() && ImGui::Button("Resolve ActorSystem / Camera")) {
+        Esp::setup();
+    }
+
+    bool on = Esp::enabled();
+    if (ImGui::Checkbox("Bật ESP", &on)) {
+        Esp::setEnabled(on);
+    }
+    ImGui::SameLine();
+    if (Esp::lastError()[0])
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", Esp::lastError());
+
+    ImGui::BeginDisabled(!on);
+    ImGui::Checkbox("Khung (box)", &Esp::g_showBox);
+    ImGui::SameLine();
+    ImGui::Checkbox("Tên/ID", &Esp::g_showName);
+    ImGui::SameLine();
+    ImGui::Checkbox("Khoảng cách", &Esp::g_showDistance);
+    ImGui::Checkbox("Chỉ trong tầm", &Esp::g_onlyInRange);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderFloat("max (m)", &Esp::g_maxDistance, 5.0f, 200.0f);
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::Text("Người chơi khác: %zu   Hiển thị: %zu", Esp::playerCount(), Esp::visibleCount());
+}
+
+// ---------------------------------------------------------------------
+//  Tab Hooks Câu Cá: hook đúng chữ ký lấy từ dump.cs
+// ---------------------------------------------------------------------
+void tabFishingHooks() {
+    if (!FishingHooks::ready() && ImGui::Button("Resolve ActorDefaultControlPlayer")) {
+        FishingHooks::setup();
+    }
+
+    bool master = FishingHooks::enabled();
+    if (ImGui::Checkbox("Bật hook câu cá", &master)) {
+        FishingHooks::setEnabled(master);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Hook (ActorDefaultControlPlayer)");
+    if (ImGui::BeginTable("fishhooks", 4,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg, ImVec2(0, 240))) {
+        ImGui::TableSetupColumn("Method");
+        ImGui::TableSetupColumn("Address");
+        ImGui::TableSetupColumn("Calls");
+        ImGui::TableSetupColumn("Ép");
+        ImGui::TableHeadersRow();
+
+        for (int i = 0; i < static_cast<int>(FishingHooks::HookId::Count); ++i) {
+            const auto id = static_cast<FishingHooks::HookId>(i);
+            const auto& st = FishingHooks::state(id);
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(FishingHooks::name(id));
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%lx", reinterpret_cast<uintptr_t>(st.target));
+            ImGui::TableNextColumn();
+            ImGui::Text("%llu", static_cast<unsigned long long>(st.calls));
+            ImGui::TableNextColumn();
+            bool on = FishingHooks::hookEnabled(id);
+            if (ImGui::Checkbox("##f", &on))
+                FishingHooks::setHookEnabled(id, on);
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::TextWrapped("ReceiveCastingResult/ReceiveFishingBegin ép castSuccess=true; "
+                       "CatchResult ép success=true; HitResult ép Hit(1).");
+}
+
 } // namespace
 
+// Vẽ ESP ở một cửa sổ fullscreen trong suốt (độc lập menu)
+static void drawEspOverlay() {
+    if (!Esp::enabled()) return;
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(io.DisplaySize);
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav;
+    if (ImGui::Begin("##esp_overlay", nullptr, flags)) {
+        Esp::draw();
+    }
+    ImGui::End();
+}
+
 void draw() {
+    // Cập nhật dữ liệu trước khi vẽ (render thread)
+    FishingAuto::tick();
+    Esp::update();
+    drawEspOverlay();
+
     ImGui::SetNextWindowSize(ImVec2(520, 0), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.9f);
 
@@ -294,7 +432,10 @@ void draw() {
     }
 
     if (ImGui::BeginTabBar("tabs")) {
+        if (ImGui::BeginTabItem("Fish Hooks")) { tabFishingHooks(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("Fish")) { tabFishFields(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Auto Fish")) { tabAutoFish(); ImGui::EndTabItem(); }
+        if (ImGui::BeginTabItem("ESP")) { tabEsp(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Find")) { tabFind(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Overrides")) { tabOverrides(); ImGui::EndTabItem(); }
         if (ImGui::BeginTabItem("Offsets")) { tabOffsets(); ImGui::EndTabItem(); }

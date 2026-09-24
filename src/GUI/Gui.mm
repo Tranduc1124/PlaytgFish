@@ -12,6 +12,7 @@
 #include "../Features/AutoFish.hpp"
 #include "Gesture.hpp"
 #include "Overlay.hpp"
+#include "Touch.hpp"
 
 namespace PF::Gui {
 namespace {
@@ -41,9 +42,10 @@ void startup() {
     registerBuiltinOffsets();
     OffsetRegistry::get().load(); // đọc file nếu người dùng đã sửa offset
 
-    // Gesture phải cài trên main thread (UIKit)
+    // Gesture + touch phải cài trên main thread (UIKit)
     dispatch_async(dispatch_get_main_queue(), ^{
         PF::Gesture::install();
+        PF::Touch::install();
         PF::Overlay::install();
     });
 

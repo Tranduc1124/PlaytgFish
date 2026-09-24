@@ -31,6 +31,17 @@ using fn_class_get_method = void* (*)(void*, size_t);
 using fn_class_get_method_from_name = void* (*)(void*, const char*, int);
 using fn_method_get_name = const char* (*)(const void*);
 using fn_method_get_pointer = void* (*)(const void*);
+// ---- Field API (quan trọng: offset field lấy theo TÊN => tự đổi theo version) ----
+using fn_class_get_field_from_name = void* (*)(void*, const char*);
+using fn_field_get_offset = size_t (*)(const void*);
+using fn_field_static_get_value = void (*)(const void*, void*);
+using fn_class_get_field_count = size_t (*)(void*);
+using fn_class_get_field = void* (*)(void*, size_t);
+using fn_field_get_name = const char* (*)(const void*);
+using fn_field_get_type = const void* (*)(const void*);
+using fn_type_get_name = char* (*)(const void*);
+// ---- Object API ----
+using fn_object_get_class = void* (*)(void*);
 
 inline fn_domain_get _domain_get = nullptr;
 inline fn_domain_get_assemblies _domain_get_assemblies = nullptr;
@@ -45,6 +56,15 @@ inline fn_class_get_method _class_get_method = nullptr;
 inline fn_class_get_method_from_name _class_get_method_from_name = nullptr;
 inline fn_method_get_name _method_get_name = nullptr;
 inline fn_method_get_pointer _method_get_pointer = nullptr;
+inline fn_class_get_field_from_name _class_get_field_from_name = nullptr;
+inline fn_field_get_offset _field_get_offset = nullptr;
+inline fn_field_static_get_value _field_static_get_value = nullptr;
+inline fn_class_get_field_count _class_get_field_count = nullptr;
+inline fn_class_get_field _class_get_field = nullptr;
+inline fn_field_get_name _field_get_name = nullptr;
+inline fn_field_get_type _field_get_type = nullptr;
+inline fn_type_get_name _type_get_name = nullptr;
+inline fn_object_get_class _object_get_class = nullptr;
 
 inline bool ready() {
     return _domain_get != nullptr && _domain_get_assemblies != nullptr;
@@ -66,9 +86,22 @@ inline bool init() {
     _method_get_name = (fn_method_get_name)dlsym(RTLD_DEFAULT, "il2cpp_method_get_name");
     _method_get_pointer = (fn_method_get_pointer)dlsym(RTLD_DEFAULT, "il2cpp_method_get_pointer");
 
+    _class_get_field_from_name =
+        (fn_class_get_field_from_name)dlsym(RTLD_DEFAULT, "il2cpp_class_get_field_from_name");
+    _field_get_offset = (fn_field_get_offset)dlsym(RTLD_DEFAULT, "il2cpp_field_get_offset");
+    _field_static_get_value =
+        (fn_field_static_get_value)dlsym(RTLD_DEFAULT, "il2cpp_field_static_get_value");
+    _class_get_field_count = (fn_class_get_field_count)dlsym(RTLD_DEFAULT, "il2cpp_class_get_field_count");
+    _class_get_field = (fn_class_get_field)dlsym(RTLD_DEFAULT, "il2cpp_class_get_field");
+    _field_get_name = (fn_field_get_name)dlsym(RTLD_DEFAULT, "il2cpp_field_get_name");
+    _field_get_type = (fn_field_get_type)dlsym(RTLD_DEFAULT, "il2cpp_field_get_type");
+    _type_get_name = (fn_type_get_name)dlsym(RTLD_DEFAULT, "il2cpp_type_get_name");
+    _object_get_class = (fn_object_get_class)dlsym(RTLD_DEFAULT, "il2cpp_object_get_class");
+
     const bool ok = _domain_get && _domain_get_assemblies && _assembly_get_image &&
                     _image_get_class_count && _image_get_class && _class_get_name;
-    PF_LOG("[il2cpp] init %s", ok ? "OK" : "PARTIAL (thiếu symbol export)");
+    PF_LOG("[il2cpp] init %s (field_api=%s object_api=%s)", ok ? "OK" : "PARTIAL (thiếu symbol export)",
+           _class_get_field_from_name ? "OK" : "NO", _object_get_class ? "OK" : "NO");
     return ok;
 }
 
@@ -165,6 +198,17 @@ inline MethodRef resolve(const char* className, const char* methodName, const ch
     return ref;
 }
 
+// Resolve method từ Il2CppClass* đã có sẵn (nhanh, không cần tìm class)
+inline MethodRef resolveByClass(void* klass, const char* methodName, int argc = -1) {
+    MethodRef ref;
+    ref.klass = klass;
+    ref.method = findMethod(klass, methodName, argc);
+    ref.fnptr = methodPointer(ref.method);
+    if (_method_get_name && ref.method) ref.name = _method_get_name(ref.method);
+    if (!ref.fnptr) PF_LOG("[il2cpp] method '%s' chưa có native pointer", methodName);
+    return ref;
+}
+
 // Tìm tất cả class chứa keyword (dùng cho tab Explorer)
 inline std::vector<ClassRef> searchClasses(const char* keyword, size_t limit = 300) {
     std::vector<ClassRef> out;
@@ -195,6 +239,117 @@ inline std::vector<MethodRef> classMethods(void* klass, const char* keyword = nu
         out.push_back(ref);
     }
     return out;
+}
+
+// ===================================================================== //
+//  FIELD API — điểm mấu chốt để "tự update offset":
+//  offset field được lấy theo TÊN lúc runtime, nên đổi version game
+//  (layout đổi) vẫn đúng miễn là tên field không đổi.
+// ===================================================================== //
+
+struct FieldRef {
+    void* field = nullptr;   // FieldInfo*
+    void* klass = nullptr;   // Il2CppClass chứa nó
+    std::string name;
+    std::string type;
+    size_t offset = 0;
+    bool isStatic = false;
+};
+
+inline void* findField(void* klass, const char* name) {
+    if (!klass || !name || !_class_get_field_from_name) return nullptr;
+    return _class_get_field_from_name(klass, name);
+}
+
+inline size_t fieldOffset(void* klass, const char* name) {
+    void* f = findField(klass, name);
+    if (!f || !_field_get_offset) return 0;
+    return _field_get_offset(f);
+}
+
+// Liệt kê field của class (dùng cho tab "Fields" trong GUI)
+inline std::vector<FieldRef> classFields(void* klass, const char* keyword = nullptr, size_t limit = 300) {
+    std::vector<FieldRef> out;
+    if (!klass || !_class_get_field_count || !_class_get_field) return out;
+    const size_t n = _class_get_field_count(klass);
+    for (size_t i = 0; i < n && out.size() < limit; ++i) {
+        void* f = _class_get_field(klass, i);
+        if (!f) continue;
+        FieldRef r;
+        r.field = f;
+        r.klass = klass;
+        r.name = _field_get_name ? _field_get_name(f) : "";
+        if (_field_get_type && _type_get_name) {
+            const void* t = _field_get_type(f);
+            if (t) r.type = _type_get_name(t);
+        }
+        r.offset = _field_get_offset ? _field_get_offset(f) : 0;
+        // offset == 0 thường là static field trong dump
+        r.isStatic = (r.offset == 0);
+        if (keyword && *keyword && r.name.find(keyword) == std::string::npos) continue;
+        out.push_back(r);
+    }
+    return out;
+}
+
+// Đọc field instance (offset tự lấy theo tên)
+template <typename T>
+inline T readField(void* object, const char* fieldName) {
+    T v{};
+    if (!object) return v;
+    void* klass = _object_get_class ? _object_get_class(object) : nullptr;
+    const size_t off = fieldOffset(klass, fieldName);
+    if (!off) return v;
+    memcpy(&v, reinterpret_cast<uint8_t*>(object) + off, sizeof(T));
+    return v;
+}
+
+// Ghi field instance
+template <typename T>
+inline bool writeField(void* object, const char* fieldName, T value) {
+    if (!object) return false;
+    void* klass = _object_get_class ? _object_get_class(object) : nullptr;
+    const size_t off = fieldOffset(klass, fieldName);
+    if (!off) return false;
+    memcpy(reinterpret_cast<uint8_t*>(object) + off, &value, sizeof(T));
+    return true;
+}
+
+// Ghi field bằng offset đã biết (nhanh hơn resolve tên mỗi lần)
+template <typename T>
+inline bool writeFieldAt(void* object, size_t offset, T value) {
+    if (!object || !offset) return false;
+    memcpy(reinterpret_cast<uint8_t*>(object) + offset, &value, sizeof(T));
+    return true;
+}
+
+template <typename T>
+inline T readFieldAt(void* object, size_t offset) {
+    T v{};
+    if (!object || !offset) return v;
+    memcpy(&v, reinterpret_cast<uint8_t*>(object) + offset, sizeof(T));
+    return v;
+}
+
+// Đọc static field (vd ActorSystem.Self)
+template <typename T>
+inline bool readStaticField(void* klass, const char* fieldName, T& out) {
+    if (!klass || !fieldName || !_class_get_field_from_name || !_field_static_get_value) return false;
+    void* f = _class_get_field_from_name(klass, fieldName);
+    if (!f) return false;
+    T tmp{};
+    _field_static_get_value(f, &tmp);
+    out = tmp;
+    return true;
+}
+
+// Gọi method không tham số trả về con trỏ (vd get_Self(), get_OtherActorCharacter())
+inline void* callNoArgObject(void* object, const char* methodName) {
+    void* klass = _object_get_class ? _object_get_class(object) : nullptr;
+    if (!klass) return nullptr;
+    auto m = resolveByClass(klass, methodName, 0);
+    if (!m.fnptr) return nullptr;
+    return reinterpret_cast<void* (*)(void*)>(m.fnptr)(object);
 }
 
 } // namespace PF::Il2Cpp
